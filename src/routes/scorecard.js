@@ -336,4 +336,174 @@ router.get('/:companyId/turnover', companyAuth, (req, res) => {
   });
 });
 
+/**
+ * GET /api/:companyId/percentile
+ *
+ * Returns CEI Buying and CEI Profit supplier tier data split by year (2024 / 2025).
+ * Suppliers are segmented by their cumulative % into four tiers, and further
+ * grouped inside each tier by value magnitude.
+ *
+ * Optional query params:
+ *   ?metric=ceiBuying              — only CEI Buying  (default: both)
+ *   ?metric=ceiProfit              — only CEI Profit
+ *   ?year=2025                     — only 2025        (default: both)
+ *   ?year=2024                     — only 2024
+ *   ?tier=top80                    — only top 80% tier
+ *   ?tier=mid80_95                 — only 80–95% tier
+ *   ?tier=tail95                   — only 95–100% tier
+ *   ?tier=noValue                  — only suppliers with no value
+ *   ?valueGroup=millions           — suppliers with value ≥ 1,000,000
+ *   ?valueGroup=thousands          — suppliers with 1,000 ≤ value < 1,000,000
+ *   ?valueGroup=subThousand        — suppliers with value < 1,000
+ *
+ * Note: ?valueGroup requires ?tier to also be set (otherwise ignored).
+ *
+ * Examples:
+ *   GET /api/conrad/percentile?metric=ceiBuying&year=2025&tier=top80&valueGroup=millions
+ *   GET /api/conrad/percentile?metric=ceiProfit&year=2025&tier=mid80_95&valueGroup=thousands
+ *   GET /api/conrad/percentile?tier=top80&valueGroup=millions
+ */
+router.get('/:companyId/percentile', companyAuth, (req, res) => {
+  const entry = watcher.getData(req.params.companyId);
+
+  if (!entry) {
+    return res.status(404).json({ success: false, error: `"${req.params.companyId}" not connected. POST /api/connect first.` });
+  }
+  if (entry.status === 'connecting' || entry.status === 'processing') {
+    return res.status(202).json({ success: false, status: entry.status, message: 'Data is loading. Try again in a few seconds.' });
+  }
+  if (entry.error) {
+    return res.status(500).json({ success: false, error: entry.error });
+  }
+  if (!entry.data?.percentileTiers) {
+    return res.status(503).json({ success: false, error: 'Percentile tier data not available. Re-upload or reconnect the Excel file.' });
+  }
+
+  const { metric, year, tier, valueGroup } = req.query;
+
+  // ── Validate params ────────────────────────────────────────────────────────
+  const validMetrics     = ['ceiBuying', 'ceiProfit'];
+  const validYears       = ['2024', '2025'];
+  const validTiers       = ['top80', 'mid80_95', 'tail95', 'noValue'];
+  const validValueGroups = ['millions', 'thousands', 'subThousand'];
+
+  if (metric     && !validMetrics.includes(metric))         return res.status(400).json({ success: false, error: `Invalid metric. Use: ${validMetrics.join(' | ')}` });
+  if (year       && !validYears.includes(year))             return res.status(400).json({ success: false, error: `Invalid year. Use: ${validYears.join(' | ')}` });
+  if (tier       && !validTiers.includes(tier))             return res.status(400).json({ success: false, error: `Invalid tier. Use: ${validTiers.join(' | ')}` });
+  if (valueGroup && !validValueGroups.includes(valueGroup)) return res.status(400).json({ success: false, error: `Invalid valueGroup. Use: ${validValueGroups.join(' | ')}` });
+  if (valueGroup && tier === 'noValue')                     return res.status(400).json({ success: false, error: 'valueGroup cannot be used with tier=noValue (noValue suppliers have no value).' });
+
+  const pct = entry.data.percentileTiers;
+
+  // ── Helper: apply tier + valueGroup filters to a year-result object ────────
+  function filterYearResult(yearResult) {
+    if (!yearResult) return null;
+
+    // No filters — return everything
+    if (!tier && !valueGroup) return yearResult;
+
+    // Tier filter only — return the matching tier(s) + summary
+    if (tier && !valueGroup) {
+      return {
+        summary: yearResult.summary,
+        tiers: { [tier]: yearResult.tiers[tier] },
+      };
+    }
+
+    // Both tier + valueGroup — return ONLY the matching supplier list
+    // (clean, focused response — no nested wrapping)
+    if (tier && valueGroup) {
+      const tierData  = yearResult.tiers[tier];
+      if (!tierData)  return null;
+      const groupData = tierData.valueGroups?.[valueGroup];
+      if (!groupData) return null;
+      return {
+        tier:          tier,
+        tierLabel:     tierData.label,
+        tierRange:     tierData.range,
+        valueGroup:    valueGroup,
+        valueGroupLabel: groupData.label,
+        valueGroupRange: groupData.range,
+        count:         groupData.count,
+        tierSummary:   yearResult.summary,
+        suppliers:     groupData.suppliers,
+      };
+    }
+
+    // valueGroup without tier — search across all tiers
+    if (!tier && valueGroup) {
+      const result = {};
+      for (const [tKey, tData] of Object.entries(yearResult.tiers)) {
+        if (tKey === 'noValue') continue;
+        const groupData = tData.valueGroups?.[valueGroup];
+        if (groupData && groupData.count > 0) {
+          result[tKey] = {
+            tierLabel:       tData.label,
+            tierRange:       tData.range,
+            valueGroup,
+            valueGroupLabel: groupData.label,
+            valueGroupRange: groupData.range,
+            count:           groupData.count,
+            suppliers:       groupData.suppliers,
+          };
+        }
+      }
+      return { summary: yearResult.summary, byTier: result };
+    }
+
+    return yearResult;
+  }
+
+  // ── Helper: build per-metric response, optionally filtered by year ─────────
+  function buildMetricResponse(metricData) {
+    if (!metricData) return null;
+
+    if (year) {
+      return {
+        metric: metricData.metric,
+        [year]: filterYearResult(metricData[year]),
+      };
+    }
+
+    return {
+      metric:  metricData.metric,
+      '2024':  filterYearResult(metricData['2024']),
+      '2025':  filterYearResult(metricData['2025']),
+    };
+  }
+
+  // ── Build final response ───────────────────────────────────────────────────
+  let responseData;
+  if (metric === 'ceiBuying') {
+    responseData = { ceiBuying: buildMetricResponse(pct.ceiBuying) };
+  } else if (metric === 'ceiProfit') {
+    responseData = { ceiProfit: buildMetricResponse(pct.ceiProfit) };
+  } else {
+    responseData = {
+      ceiBuying: buildMetricResponse(pct.ceiBuying),
+      ceiProfit: buildMetricResponse(pct.ceiProfit),
+    };
+  }
+
+  return res.json({
+    success:     true,
+    companyId:   req.params.companyId,
+    lastUpdated: entry.data.lastUpdated,
+    filters: {
+      metric:     metric     || 'all',
+      year:       year       || 'all',
+      tier:       tier       || 'all',
+      valueGroup: valueGroup || 'all',
+    },
+    valueGroupReference: {
+      millions:    { label: '≥ 1 Million',  range: '≥ 1,000,000',      queryParam: '?valueGroup=millions'    },
+      thousands:   { label: '1K – 1M',      range: '1,000 – 999,999',  queryParam: '?valueGroup=thousands'   },
+      subThousand: { label: 'Below 1K',     range: '< 1,000',          queryParam: '?valueGroup=subThousand' },
+    },
+    ...responseData,
+  });
+});
+
 module.exports = router;
+
+
