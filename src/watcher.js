@@ -22,9 +22,10 @@ const fs           = require('fs');
 const crypto       = require('crypto');
 const chokidar     = require('chokidar');
 const { downloadExcel }  = require('./downloader');
-const { parseWorkbook }  = require('./engine/parser');
-const { gradeSupplier }  = require('./engine/grader');
-const { calcScores }     = require('./engine/scorer');
+const { parseWorkbook }      = require('./engine/parser');
+const { gradeSupplier }      = require('./engine/grader');
+const { calcScores }         = require('./engine/scorer');
+const { buildPercentileTiers } = require('./engine/percentile');
 
 const POLL_INTERVAL_MS = (process.env.POLL_MINUTES || 5) * 60 * 1000; // default 5 min
 
@@ -177,6 +178,26 @@ function processFile(companyId, filePathOrBuffer) {
       turnoverClassDistribution,
       turnoverTotals,
     };
+
+    // ── Percentile tiers (CEI Buying + CEI Profit, 2024 & 2025) ─────────────
+    // Requires a workbook object, so re-read it from the source
+    try {
+      let wbForPct;
+      if (Buffer.isBuffer(filePathOrBuffer)) {
+        const XLSX = require('xlsx');
+        wbForPct = XLSX.read(filePathOrBuffer, { type: 'buffer', cellFormula: false, cellHTML: false });
+      } else {
+        const XLSX = require('xlsx');
+        wbForPct = XLSX.readFile(filePathOrBuffer, { cellFormula: false, cellHTML: false });
+      }
+      // ✅ Pass scoresMap so KPI pillar scores are embedded in each supplier entry
+      entry.data.percentileTiers = buildPercentileTiers(wbForPct, lookups.scoresMap);
+      wbForPct = null; // allow GC
+    } catch (pctErr) {
+      console.warn(`[${companyId}] ⚠️ Percentile tiers could not be built:`, pctErr.message);
+      entry.data.percentileTiers = null;
+    }
+
 
     entry.error  = null;
     entry.status = 'live';
