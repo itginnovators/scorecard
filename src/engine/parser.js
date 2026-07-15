@@ -192,19 +192,19 @@ function buildFromResults(wb) {
   const ceiBuyingMap = buildCeiBuyingMap(wb);
   const ceiProfitMap = buildCeiProfitMap(wb);
   const ceeRetailMap = buildCeeRetailMap(wb);
-  const ceeCm1Map    = buildCeeCm1Map(wb);
+  const ceeCm1Map = buildCeeCm1Map(wb);
 
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
 
-  const gradesMap   = {};
-  const scoresMap   = {};
+  const gradesMap = {};
+  const scoresMap = {};
   const turnoverMap = {};
-  const results     = [];
+  const results = [];
 
   // Helper: safely extract a numeric score cell from Results sheet
   const n = (row, col, dp = 2) => {
     const v = row[col];
-    if (v == null || isNaN(Number(v))) return 0;
+    if (v == null || String(v).trim() === '' || isNaN(Number(v))) return 'NA';
     return parseFloat(Number(v).toFixed(dp));
   };
 
@@ -213,7 +213,7 @@ function buildFromResults(wb) {
     const v = row[col];
     if (v == null) return null;
     const str = String(v).trim().toUpperCase();
-    if (['A','B','C','D'].includes(str)) return str;
+    if (['A', 'B', 'C', 'D'].includes(str)) return str;
     return numToGrade(v);
   };
 
@@ -234,74 +234,74 @@ function buildFromResults(wb) {
     // ── Grade columns (3–21) — numeric KPI scores converted to A/B/C/D ────────
     gradesMap[vendorNo] = {
       // Turnover and Margin
-      ceiBuying:    g(row, 3),
-      ceeRetail:    g(row, 4),
-      ceiProfit:    g(row, 5),
-      ceeCm1:       g(row, 6),
+      ceiBuying: g(row, 3),
+      ceeRetail: g(row, 4),
+      ceiProfit: g(row, 5),
+      ceeCm1: g(row, 6),
       // Assortment & Innovation
-      newItem:      g(row, 7),
-      pipeline:     g(row, 8),
+      newItem: g(row, 7),
+      pipeline: g(row, 8),
       // Quality Assurance
-      passRate:     g(row, 9),
-      defectRate:   g(row, 10),
-      reInspect:    g(row, 11),
-      returnRate:   g(row, 12),
-      complain:     g(row, 13),
+      passRate: g(row, 9),
+      defectRate: g(row, 10),
+      reInspect: g(row, 11),
+      returnRate: g(row, 12),
+      complain: g(row, 13),
       // Fulfillment Operations
-      onTime:       g(row, 14),
-      vessel:       g(row, 15),
-      inspBook:     g(row, 16),
-      orderConf:    g(row, 17),
+      onTime: g(row, 14),
+      vessel: g(row, 15),
+      inspBook: g(row, 16),
+      orderConf: g(row, 17),
       // Terms & Conditions
-      payment:      g(row, 18),
-      remission:    g(row, 19),
-      bonus:        g(row, 20),
-      mov:          g(row, 21),
+      payment: g(row, 18),
+      remission: g(row, 19),
+      bonus: g(row, 20),
+      mov: g(row, 21),
     };
 
     // ── Pre-computed pillar scores from Excel (cols 22–27) ───────────────────
-    const turnoverMarginScore       = n(row, 22, 2);
+    const turnoverMarginScore = n(row, 22, 2);
     const assortmentInnovationScore = n(row, 23, 2);
-    const qualityScore              = n(row, 24, 2);
-    const fulfillmentScore          = n(row, 25, 2);
-    const termsScore                = n(row, 26, 2);
-    const total                     = n(row, 27, 2);
+    const qualityScore = n(row, 24, 2);
+    const fulfillmentScore = n(row, 25, 2);
+    const termsScore = n(row, 26, 2);
+    const total = n(row, 27, 2);
 
     // Extra classification fields
     const businessClass = row[28] != null ? String(row[28]).trim() : null;
-    const performance   = row[29] != null ? String(row[29]).trim() : null;
-    const overallClass  = row[30] != null ? String(row[30]).trim() : null;
+    const performance = row[29] != null ? String(row[29]).trim() : null;
+    const overallClass = row[30] != null ? String(row[30]).trim() : null;
 
     // ── Actual financial values from individual KPI sheets ───────────────────
-    const ceiBuy   = ceiBuyingMap[vendorNo] || {};
-    const ceiProf  = ceiProfitMap[vendorNo] || {};
-    const ceeRet   = ceeRetailMap[vendorNo] || {};
-    const ceeCm1   = ceeCm1Map[vendorNo]    || {};
+    const ceiBuy = ceiBuyingMap[vendorNo] || {};
+    const ceiProf = ceiProfitMap[vendorNo] || {};
+    const ceeRet = ceeRetailMap[vendorNo] || {};
+    const ceeCm1 = ceeCm1Map[vendorNo] || {};
 
     scoresMap[vendorNo] = {
-      turnoverMargin:       turnoverMarginScore,
+      turnoverMargin: turnoverMarginScore,
       assortmentInnovation: assortmentInnovationScore,
-      quality:              qualityScore,
-      fulfillment:          fulfillmentScore,
-      terms:                termsScore,
+      quality: qualityScore,
+      fulfillment: fulfillmentScore,
+      terms: termsScore,
       total,
       businessClass,
       performance,
       overallClass,
       // Actual EUR values
-      ceiBuying2024:  ceiBuy.ceiBuying2024  || 0,
-      ceiBuying2025:  ceiBuy.ceiBuying2025  || safeNum(row[31], 2),  // fallback to Results col 31
-      ceeRetail2025:  ceeRet.ceeRetail2025  || 0,
-      ceiProfit2024:  ceiProf.ceiProfit2024 || 0,
-      ceiProfit2025:  ceiProf.ceiProfit2025 || 0,
-      ceeCm12025:     ceeCm1.ceeCm12025     || 0,
+      ceiBuying2024: ceiBuy.ceiBuying2024 || 0,
+      ceiBuying2025: ceiBuy.ceiBuying2025 || safeNum(row[31], 2),  // fallback to Results col 31
+      ceeRetail2025: ceeRet.ceeRetail2025 || 0,
+      ceiProfit2024: ceiProf.ceiProfit2024 || 0,
+      ceiProfit2025: ceiProf.ceiProfit2025 || 0,
+      ceeCm12025: ceeCm1.ceeCm12025 || 0,
     };
 
     // ── Turnover map — full data for chart endpoint ──────────────────────────
     turnoverMap[vendorNo] = {
       vendorNo,
-      vendorName:    row[1] ? String(row[1]).trim() : '',
-      team:          row[2] ? String(row[2]).trim() : '',
+      vendorName: row[1] ? String(row[1]).trim() : '',
+      team: row[2] ? String(row[2]).trim() : '',
       // Pillar score out of 30
       turnoverScore: turnoverMarginScore,
       // Business classification
@@ -309,33 +309,33 @@ function buildFromResults(wb) {
       performance,
       // ── Actual EUR/HKD financial values (all 4 turnover KPIs) ──────────────
       actuals: {
-        ceiBuying2024:  ceiBuy.ceiBuying2024  || 0,   // EUR — previous year buy value
-        ceiBuying2025:  ceiBuy.ceiBuying2025  || safeNum(row[31], 2), // EUR — current year buy value
-        ceeRetail2025:  ceeRet.ceeRetail2025  || 0,   // EUR — retail GMV current year
-        ceiProfit2024:  ceiProf.ceiProfit2024 || 0,   // HKD — profit previous year
-        ceiProfit2025:  ceiProf.ceiProfit2025 || 0,   // HKD — profit current year
-        ceeCm12025:     ceeCm1.ceeCm12025     || 0,   // EUR — CM1 Goods current year
+        ceiBuying2024: ceiBuy.ceiBuying2024 || 0,   // EUR — previous year buy value
+        ceiBuying2025: ceiBuy.ceiBuying2025 || safeNum(row[31], 2), // EUR — current year buy value
+        ceeRetail2025: ceeRet.ceeRetail2025 || 0,   // EUR — retail GMV current year
+        ceiProfit2024: ceiProf.ceiProfit2024 || 0,   // HKD — profit previous year
+        ceiProfit2025: ceiProf.ceiProfit2025 || 0,   // HKD — profit current year
+        ceeCm12025: ceeCm1.ceeCm12025 || 0,   // EUR — CM1 Goods current year
       },
       // Individual KPI numeric scores (0–3) for radar/breakdown chart
       kpis: {
         ceiBuying: kpiNum(row, 3),
         ceeRetail: kpiNum(row, 4),
         ceiProfit: kpiNum(row, 5),
-        ceeCm1:    kpiNum(row, 6),
+        ceeCm1: kpiNum(row, 6),
       },
       // Letter grades for badge display
       grades: {
         ceiBuying: g(row, 3),
         ceeRetail: g(row, 4),
         ceiProfit: g(row, 5),
-        ceeCm1:    g(row, 6),
+        ceeCm1: g(row, 6),
       },
     };
 
     results.push({
       vendorNo,
       vendorName: row[1] ? String(row[1]).trim() : '',
-      team:       row[2] ? String(row[2]).trim() : '',
+      team: row[2] ? String(row[2]).trim() : '',
     });
   }
 
