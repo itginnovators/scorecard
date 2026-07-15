@@ -18,13 +18,13 @@
  *   - Dashboard always serves from memory (instant response)
  */
 
-const fs           = require('fs');
-const crypto       = require('crypto');
-const chokidar     = require('chokidar');
-const { downloadExcel }  = require('./downloader');
-const { parseWorkbook }      = require('./engine/parser');
-const { gradeSupplier }      = require('./engine/grader');
-const { calcScores }         = require('./engine/scorer');
+const fs = require('fs');
+const crypto = require('crypto');
+const chokidar = require('chokidar');
+const { downloadExcel } = require('./downloader');
+const { parseWorkbook } = require('./engine/parser');
+const { gradeSupplier } = require('./engine/grader');
+const { calcScores } = require('./engine/scorer');
 const { buildPercentileTiers } = require('./engine/percentile');
 
 const POLL_INTERVAL_MS = (process.env.POLL_MINUTES || 5) * 60 * 1000; // default 5 min
@@ -48,19 +48,19 @@ function processFile(companyId, filePathOrBuffer) {
   entry.status = 'processing';
 
   try {
-    const lookups  = parseWorkbook(filePathOrBuffer);
-    const vendors  = lookups.results;   // [ { vendorNo, vendorName, team } ]
+    const lookups = parseWorkbook(filePathOrBuffer);
+    const vendors = lookups.results;   // [ { vendorNo, vendorName, team } ]
     if (!vendors || !vendors.length) throw new Error('No suppliers found in Results sheet of Excel.');
 
     const suppliers = vendors.map((v) => {
-      const { grades, dataWarnings }                              = gradeSupplier(v.vendorNo, lookups);
+      const { grades, dataWarnings } = gradeSupplier(v.vendorNo, lookups);
       const { pillars, totalScore, tier,
-              businessClass, performance, overallClass,
-              actuals }                                          = calcScores(lookups.scoresMap[v.vendorNo] || {});
+        businessClass, performance, overallClass,
+        actuals } = calcScores(lookups.scoresMap[v.vendorNo] || {});
       return {
-        vendorNo:      v.vendorNo,
-        vendorName:    v.vendorName,
-        team:          v.team,
+        vendorNo: v.vendorNo,
+        vendorName: v.vendorName,
+        team: v.team,
         tier,
         totalScore,
         pillars,
@@ -73,26 +73,35 @@ function processFile(companyId, filePathOrBuffer) {
       };
     });
 
-    suppliers.sort((a, b) => b.totalScore - a.totalScore);
+    suppliers.sort((a, b) => {
+      const scoreA = a.totalScore === 'NA' ? -1 : a.totalScore;
+      const scoreB = b.totalScore === 'NA' ? -1 : b.totalScore;
+      return scoreB - scoreA;
+    });
 
     const total = suppliers.length;
+
+    const validScores = suppliers.filter(s => s.totalScore !== 'NA').map(s => s.totalScore);
+    const sumScores = validScores.reduce((s, x) => s + x, 0);
+    const validCount = validScores.length || 1; // avoid division by zero
+
     const summary = {
-      totalSuppliers:     total,
-      strategicPartners:  suppliers.filter(s => s.tier === 'Strategic Partner').length,
+      totalSuppliers: total,
+      strategicPartners: suppliers.filter(s => s.tier === 'Strategic Partner').length,
       preferredSuppliers: suppliers.filter(s => s.tier === 'Preferred Supplier').length,
-      approvedSuppliers:  suppliers.filter(s => s.tier === 'Approved Supplier').length,
-      atRisk:             suppliers.filter(s => s.tier === 'At Risk').length,
-      avgScore:           parseFloat((suppliers.reduce((s, x) => s + x.totalScore, 0) / total).toFixed(2)),
-      topScore:           suppliers[0]?.totalScore || 0,
-      bottomScore:        suppliers[total - 1]?.totalScore || 0,
+      approvedSuppliers: suppliers.filter(s => s.tier === 'Approved Supplier').length,
+      atRisk: suppliers.filter(s => s.tier === 'At Risk').length,
+      avgScore: parseFloat((sumScores / validCount).toFixed(2)),
+      topScore: validScores.length ? Math.max(...validScores) : 0,
+      bottomScore: validScores.length ? Math.min(...validScores) : 0,
       totalCeiBuying2025: parseFloat(suppliers.reduce((s, x) => s + (x.actuals?.ceiBuying2025 || 0), 0).toFixed(2)),
     };
 
     const tierDistribution = [
-      { tier: 'Strategic Partner',  count: summary.strategicPartners,  pct: +((summary.strategicPartners  / total * 100).toFixed(1)) },
+      { tier: 'Strategic Partner', count: summary.strategicPartners, pct: +((summary.strategicPartners / total * 100).toFixed(1)) },
       { tier: 'Preferred Supplier', count: summary.preferredSuppliers, pct: +((summary.preferredSuppliers / total * 100).toFixed(1)) },
-      { tier: 'Approved Supplier',  count: summary.approvedSuppliers,  pct: +((summary.approvedSuppliers  / total * 100).toFixed(1)) },
-      { tier: 'At Risk',            count: summary.atRisk,             pct: +((summary.atRisk             / total * 100).toFixed(1)) },
+      { tier: 'Approved Supplier', count: summary.approvedSuppliers, pct: +((summary.approvedSuppliers / total * 100).toFixed(1)) },
+      { tier: 'At Risk', count: summary.atRisk, pct: +((summary.atRisk / total * 100).toFixed(1)) },
     ];
 
     // ── Turnover chart data: all suppliers with actuals, sorted by CEI Buying 2025 desc ──
@@ -100,15 +109,15 @@ function processFile(companyId, filePathOrBuffer) {
       .filter(t => t.actuals?.ceiBuying2025 > 0)
       .sort((a, b) => b.actuals.ceiBuying2025 - a.actuals.ceiBuying2025)
       .map(t => ({
-        vendorNo:      t.vendorNo,
-        vendorName:    t.vendorName,
-        team:          t.team,
+        vendorNo: t.vendorNo,
+        vendorName: t.vendorName,
+        team: t.team,
         turnoverScore: t.turnoverScore,
         businessClass: t.businessClass,
-        performance:   t.performance,
-        grades:        t.grades,
-        kpis:          t.kpis,
-        actuals:       t.actuals,
+        performance: t.performance,
+        grades: t.grades,
+        kpis: t.kpis,
+        actuals: t.actuals,
       }));
 
     // Business class distribution for turnover chart
@@ -121,12 +130,12 @@ function processFile(companyId, filePathOrBuffer) {
         classValue[cls] = parseFloat((classValue[cls] + (t.actuals?.ceiBuying2025 || 0)).toFixed(2));
       }
     });
-    const turnoverClassDistribution = ['A','B','C','D'].map(cls => ({
-      class:         cls,
-      count:         classCount[cls],
-      totalValue:    classValue[cls],
-      totalValueM:   parseFloat((classValue[cls] / 1_000_000).toFixed(3)), // in millions
-      pct:           total > 0 ? +((classCount[cls] / total * 100).toFixed(1)) : 0,
+    const turnoverClassDistribution = ['A', 'B', 'C', 'D'].map(cls => ({
+      class: cls,
+      count: classCount[cls],
+      totalValue: classValue[cls],
+      totalValueM: parseFloat((classValue[cls] / 1_000_000).toFixed(3)), // in millions
+      pct: total > 0 ? +((classCount[cls] / total * 100).toFixed(1)) : 0,
     }));
 
     // ── Grand totals across ALL suppliers for each turnover KPI ────────────────
@@ -137,14 +146,14 @@ function processFile(companyId, filePathOrBuffer) {
       totalCeeRetail2025: parseFloat(turnoverChart.reduce((s, t) => s + (t.actuals?.ceeRetail2025 || 0), 0).toFixed(2)),
       totalCeiProfit2024: parseFloat(turnoverChart.reduce((s, t) => s + (t.actuals?.ceiProfit2024 || 0), 0).toFixed(2)),
       totalCeiProfit2025: parseFloat(turnoverChart.reduce((s, t) => s + (t.actuals?.ceiProfit2025 || 0), 0).toFixed(2)),
-      totalCeeCm12025:    parseFloat(turnoverChart.reduce((s, t) => s + (t.actuals?.ceeCm12025    || 0), 0).toFixed(2)),
+      totalCeeCm12025: parseFloat(turnoverChart.reduce((s, t) => s + (t.actuals?.ceeCm12025 || 0), 0).toFixed(2)),
       // In Millions (for chart labels)
       totalCeiBuying2024M: parseFloat((turnoverChart.reduce((s, t) => s + (t.actuals?.ceiBuying2024 || 0), 0) / 1_000_000).toFixed(3)),
       totalCeiBuying2025M: parseFloat((turnoverChart.reduce((s, t) => s + (t.actuals?.ceiBuying2025 || 0), 0) / 1_000_000).toFixed(3)),
       totalCeeRetail2025M: parseFloat((turnoverChart.reduce((s, t) => s + (t.actuals?.ceeRetail2025 || 0), 0) / 1_000_000).toFixed(3)),
       totalCeiProfit2024M: parseFloat((turnoverChart.reduce((s, t) => s + (t.actuals?.ceiProfit2024 || 0), 0) / 1_000_000).toFixed(3)),
       totalCeiProfit2025M: parseFloat((turnoverChart.reduce((s, t) => s + (t.actuals?.ceiProfit2025 || 0), 0) / 1_000_000).toFixed(3)),
-      totalCeeCm12025M:    parseFloat((turnoverChart.reduce((s, t) => s + (t.actuals?.ceeCm12025    || 0), 0) / 1_000_000).toFixed(3)),
+      totalCeeCm12025M: parseFloat((turnoverChart.reduce((s, t) => s + (t.actuals?.ceeCm12025 || 0), 0) / 1_000_000).toFixed(3)),
       // YoY growth CEI Buying
       ceiBuyingGrowthPct: (() => {
         const prev = turnoverChart.reduce((s, t) => s + (t.actuals?.ceiBuying2024 || 0), 0);
@@ -154,25 +163,25 @@ function processFile(companyId, filePathOrBuffer) {
       })(),
       // Performance breakdown across all suppliers
       performanceDistribution: {
-        top:      turnoverChart.filter(t => t.performance === '1.top').length,
-        preferred:turnoverChart.filter(t => t.performance === '2.prefered').length,
-        under:    turnoverChart.filter(t => t.performance === '3.under').length,
+        top: turnoverChart.filter(t => t.performance === '1.top').length,
+        preferred: turnoverChart.filter(t => t.performance === '2.prefered').length,
+        under: turnoverChart.filter(t => t.performance === '3.under').length,
         critical: turnoverChart.filter(t => t.performance === '4.critical').length,
-        noData:   turnoverChart.filter(t => !t.performance).length,
+        noData: turnoverChart.filter(t => !t.performance).length,
       },
     };
 
     // ✅ ZDR: Only the computed scorecard JSON is kept — not the raw Excel buffer
     entry.data = {
       companyId,
-      companyName:               entry.meta.companyName,
-      sourceType:                entry.meta.sourceType,
-      lastUpdated:               new Date().toISOString(),
-      nextRefreshIn:             entry.meta.sourceType === 'onedrive' ? `${process.env.POLL_MINUTES || 5} minutes` : 'on file change',
+      companyName: entry.meta.companyName,
+      sourceType: entry.meta.sourceType,
+      lastUpdated: new Date().toISOString(),
+      nextRefreshIn: entry.meta.sourceType === 'onedrive' ? `${process.env.POLL_MINUTES || 5} minutes` : 'on file change',
       summary,
       tierDistribution,
-      topSuppliers:              suppliers.slice(0, 10),
-      bottomSuppliers:           suppliers.slice(-5).reverse(),
+      topSuppliers: suppliers.slice(0, 10),
+      bottomSuppliers: suppliers.slice(-5).reverse(),
       suppliers,
       turnoverChart,
       turnoverClassDistribution,
@@ -199,12 +208,12 @@ function processFile(companyId, filePathOrBuffer) {
     }
 
 
-    entry.error  = null;
+    entry.error = null;
     entry.status = 'live';
     console.log(`[${companyId}] ✅ ${total} suppliers processed. Avg: ${summary.avgScore}. Turnover chart: ${turnoverChart.length} suppliers.`);
 
   } catch (err) {
-    entry.error  = err.message;
+    entry.error = err.message;
     entry.status = 'error';
     console.error(`[${companyId}] ❌ Error:`, err.message);
   }
@@ -232,7 +241,7 @@ async function pollOneDrive(companyId) {
 
     entry.meta.lastPolled = new Date().toISOString();
   } catch (err) {
-    entry.error  = err.message;
+    entry.error = err.message;
     entry.status = 'error';
     console.error(`[${companyId}] ❌ Poll failed:`, err.message);
   }
@@ -250,7 +259,7 @@ function watchLocalFile(companyId, filePath) {
     processFile(companyId, filePath); // Local file: pass path as before
   });
   w.on('unlink', () => {
-    store[companyId].error  = 'File was deleted from disk.';
+    store[companyId].error = 'File was deleted from disk.';
     store[companyId].status = 'error';
   });
   return w;
@@ -271,14 +280,14 @@ async function connectOneDrive(companyId, companyName, shareLink) {
   const companyKey = generateCompanyKey();
 
   store[companyId] = {
-    meta:       { companyId, companyName, sourceType: 'onedrive', shareLink, connectedAt: new Date().toISOString(), lastPolled: null },
-    data:       null,
-    error:      null,
-    status:     'connecting',
-    lastHash:   null,       // ✅ ZDR: hash lives here in memory, not on disk
+    meta: { companyId, companyName, sourceType: 'onedrive', shareLink, connectedAt: new Date().toISOString(), lastPolled: null },
+    data: null,
+    error: null,
+    status: 'connecting',
+    lastHash: null,       // ✅ ZDR: hash lives here in memory, not on disk
     companyKey,             // ✅ Per-company API key — stored in RAM only
-    timer:      null,
-    watcher:    null,
+    timer: null,
+    watcher: null,
   };
 
   // Initial download + process
@@ -305,14 +314,14 @@ function connectUpload(companyId, companyName) {
   const companyKey = generateCompanyKey();
 
   store[companyId] = {
-    meta:       { companyId, companyName, sourceType: 'upload', connectedAt: new Date().toISOString(), lastUploaded: null },
-    data:       null,
-    error:      null,
-    status:     'waiting', // waiting for client to push their first file
-    lastHash:   null,
+    meta: { companyId, companyName, sourceType: 'upload', connectedAt: new Date().toISOString(), lastUploaded: null },
+    data: null,
+    error: null,
+    status: 'waiting', // waiting for client to push their first file
+    lastHash: null,
     companyKey,
-    timer:      null,
-    watcher:    null,
+    timer: null,
+    watcher: null,
   };
 
   console.log(`[${companyId}] ✅ Registered for direct upload. Awaiting Excel push...`);
@@ -347,15 +356,15 @@ function processUpload(companyId, buffer) {
     }
 
     return {
-      success:        true,
+      success: true,
       totalSuppliers: entry.data?.summary?.totalSuppliers || 0,
-      avgScore:       entry.data?.summary?.avgScore       || 0,
-      lastUpdated:    entry.data?.lastUpdated             || new Date().toISOString(),
+      avgScore: entry.data?.summary?.avgScore || 0,
+      lastUpdated: entry.data?.lastUpdated || new Date().toISOString(),
     };
 
   } catch (err) {
     entry.status = 'error';
-    entry.error  = err.message;
+    entry.error = err.message;
     return { success: false, error: err.message };
   }
 }
@@ -370,14 +379,14 @@ function connectLocal(companyId, companyName, filePath) {
   const companyKey = generateCompanyKey();
 
   store[companyId] = {
-    meta:       { companyId, companyName, sourceType: 'local', filePath, connectedAt: new Date().toISOString() },
-    data:       null,
-    error:      null,
-    status:     'connecting',
-    lastHash:   null,
+    meta: { companyId, companyName, sourceType: 'local', filePath, connectedAt: new Date().toISOString() },
+    data: null,
+    error: null,
+    status: 'connecting',
+    lastHash: null,
     companyKey,             // ✅ Per-company API key — stored in RAM only
-    timer:      null,
-    watcher:    null,
+    timer: null,
+    watcher: null,
   };
 
   processFile(companyId, filePath);
@@ -387,30 +396,30 @@ function connectLocal(companyId, companyName, filePath) {
   return store[companyId];
 }
 
-function getData(companyId)     { return store[companyId] || null; }
+function getData(companyId) { return store[companyId] || null; }
 function getCompanyKey(companyId) { return store[companyId]?.companyKey || null; }
-function listAll()              { return Object.values(store).map(_summary); }
+function listAll() { return Object.values(store).map(_summary); }
 
 function _summary(e) {
   return {
-    companyId:   e.meta.companyId,
+    companyId: e.meta.companyId,
     companyName: e.meta.companyName,
-    sourceType:  e.meta.sourceType,
-    shareLink:   e.meta.shareLink   || null,
-    filePath:    e.meta.filePath    || null,
+    sourceType: e.meta.sourceType,
+    shareLink: e.meta.shareLink || null,
+    filePath: e.meta.filePath || null,
     connectedAt: e.meta.connectedAt,
     lastUpdated: e.data?.lastUpdated || null,
-    lastPolled:  e.meta.lastPolled   || null,
-    status:      e.status,
-    suppliers:   e.data?.summary?.totalSuppliers || 0,
-    error:       e.error || null,
+    lastPolled: e.meta.lastPolled || null,
+    status: e.status,
+    suppliers: e.data?.summary?.totalSuppliers || 0,
+    error: e.error || null,
   };
 }
 
 function _cleanup(companyId) {
   const e = store[companyId];
   if (!e) return;
-  if (e.timer)   clearInterval(e.timer);
+  if (e.timer) clearInterval(e.timer);
   if (e.watcher) e.watcher.close();
   delete store[companyId];
 }
